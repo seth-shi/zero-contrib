@@ -41,11 +41,11 @@ func (b *builder) Build(url resolver.Target, conn resolver.ClientConn, opts reso
 	}
 
 	cc := &constant.ClientConfig{
-		AppName:     tgt.AppName,
-		NamespaceId: tgt.NamespaceID,
-		Username:    tgt.User,
-		Password:    tgt.Password,
-		TimeoutMs:   uint64(tgt.Timeout),
+		AppName:              tgt.AppName,
+		NamespaceId:          tgt.NamespaceID,
+		Username:             tgt.User,
+		Password:             tgt.Password,
+		TimeoutMs:            uint64(tgt.Timeout),
 		NotLoadCacheAtStart:  tgt.NotLoadCacheAtStart,
 		UpdateCacheWhenEmpty: tgt.UpdateCacheWhenEmpty,
 	}
@@ -70,15 +70,27 @@ func (b *builder) Build(url resolver.Target, conn resolver.ClientConn, opts reso
 
 	ctx, cancel := context.WithCancel(context.Background())
 	pipe := make(chan []string)
+	subscriber := newWatcher(ctx, cancel, pipe)
 
+	// first load
+	go subscriber.CallBackHandle(cli.SelectInstances(
+		vo.SelectInstancesParam{
+			ServiceName: tgt.Service,
+			Clusters:    tgt.Clusters,
+			GroupName:   tgt.GroupName,
+			HealthyOnly: true,
+		},
+	))
+
+	go populateEndpoints(ctx, conn, pipe)
+	
+	// watch change
 	go cli.Subscribe(&vo.SubscribeParam{
 		ServiceName:       tgt.Service,
 		Clusters:          tgt.Clusters,
 		GroupName:         tgt.GroupName,
-		SubscribeCallback: newWatcher(ctx, cancel, pipe).CallBackHandle, // required
+		SubscribeCallback: subscriber.CallBackHandle, // required
 	})
-
-	go populateEndpoints(ctx, conn, pipe)
 
 	return &resolvr{cancelFunc: cancel}, nil
 }
